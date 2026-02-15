@@ -1,7 +1,14 @@
 // contentScript.js — injects subtitle overlay and handles display settings
-// Guard: run only once per page
+
 (function () {
-  if (document.getElementById('hls-overlay-root')) return;
+  // ── FIX: Cleanup "Zombie" Overlays ────────────────────────────────────────
+  // If an overlay exists from a previous extension session, remove it.
+  // This ensures we always register a fresh message listener.
+  const existing = document.getElementById('hls-overlay-root');
+  if (existing) {
+    existing.remove();
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   // ── Build overlay DOM ─────────────────────────────────────────────────────
   const root  = document.createElement('div');
@@ -14,10 +21,13 @@
   document.documentElement.appendChild(root);
 
   // ── Load Noto Sans for crisp subtitle rendering ───────────────────────────
-  const link = document.createElement('link');
-  link.rel  = 'stylesheet';
-  link.href = 'https://fonts.googleapis.com/css2?family=Noto+Sans:wght@700&display=swap';
-  document.head?.appendChild(link);
+  // Check if link already exists to avoid duplicates
+  if (!document.querySelector('link[href*="Noto+Sans"]')) {
+    const link = document.createElement('link');
+    link.rel  = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=Noto+Sans:wght@700&display=swap';
+    document.head?.appendChild(link);
+  }
 
   // ── State ─────────────────────────────────────────────────────────────────
   let hideTimer = null;
@@ -60,7 +70,9 @@
   }
 
   // ── Message listener ──────────────────────────────────────────────────────
-  chrome.runtime.onMessage.addListener((msg) => {
+  // We explicitly assign this to a variable (though anonymous function works too)
+  // to ensure it's registered every time this script runs.
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SUBTITLE' && msg.text?.trim()) {
       showSubtitle(msg.text.trim());
     }
@@ -70,6 +82,8 @@
     if (msg.type === 'UPDATE_DISPLAY') {
       applySettings(msg);
     }
+    // Return false to indicate no async response needed
+    return false;
   });
 
 })();
