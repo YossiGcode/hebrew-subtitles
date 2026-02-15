@@ -1,0 +1,84 @@
+/* overlay.css — professional cinematic subtitle overlay */
+/* Font loaded dynamically by contentScript.js to avoid CSP issues */
+
+#hls-overlay-root {
+  all: initial;
+
+  /* Positioning — JS overrides bottom/top for top/center modes */
+  position: fixed;
+  bottom:   8%;
+  left:     50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+
+  /* Layout */
+  max-width: 82vw;
+  width: max-content;
+  pointer-events: none;
+
+  /* Fade in/out */
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+
+#hls-overlay-root.hls-visible {
+  opacity: 1;
+}
+
+#hls-overlay-root.hls-pos-top {
+  bottom: auto;
+  top: 8%;
+}
+
+#hls-overlay-root.hls-pos-center {
+  bottom: auto;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+#hls-subtitle-text {
+  all: initial;
+  display: block;
+
+  /* Typography — size overridden inline by JS */
+  font-family: 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 22px;    /* default; JS sets this from settings */
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  color: #ffffff;
+  text-align: center;
+
+  /* Multi-layer shadow for legibility on ANY background */
+  text-shadow:
+    0  1px 2px rgba(0,0,0,1),
+    0  2px 6px rgba(0,0,0,.9),
+    0  4px 14px rgba(0,0,0,.7),
+    -1px 0 1px rgba(0,0,0,1),
+     1px 0 1px rgba(0,0,0,1);
+
+  /* Semi-transparent pill */
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 9px 24px 10px;
+  border-radius: 7px;
+
+  /* Thin accent bar on top */
+  border-top: 2px solid rgba(74, 240, 168, 0.6);
+
+  /* Text wrapping */
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-sizing: border-box;
+}
+
+/* Entrance animation applied once per subtitle */
+@keyframes hls-drop-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+#hls-overlay-root.hls-visible #hls-subtitle-text {
+  animation: hls-drop-in 0.2s ease forwards;
+}

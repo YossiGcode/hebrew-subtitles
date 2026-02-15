@@ -1,0 +1,29 @@
+# Hebrew Live Subtitles — Backend
+# Python 3.9+  |  requires: ffmpeg in PATH
+
+# ── Web framework ──────────────────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+websockets>=12.0
+
+# ── Whisper — prefer faster-whisper (4× faster on CPU, lower RAM) ──────────────
+# Install ONE of the two blocks below:
+
+# Option A: faster-whisper (recommended)
+faster-whisper>=1.0.0
+
+# Option B: original openai-whisper (fallback if CTranslate2 has issues)
+# openai-whisper>=20231117
+
+# ── Audio decoding ─────────────────────────────────────────────────────────────
+audioop-lts>=0.2.0; python_version>='3.13'  # stdlib audioop removed in 3.13+
+pydub>=0.25.1          # wraps ffmpeg — needs `ffmpeg` binary installed
+
+# ── PyTorch (CPU default — override with CUDA wheel for GPU) ──────────────────
+# CPU:
+torch>=2.0.0
+# CUDA (uncomment and run: pip install torch --index-url https://download.pytorch.org/whl/cu121):
+# torch>=2.0.0+cu121
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+numpy>=1.24.0

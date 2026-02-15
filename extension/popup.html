@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hebrew Live Subtitles</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;500;700&display=swap');
+
+    :root {
+      --bg:      #0d0f14;
+      --surface: #161921;
+      --border:  #252830;
+      --accent:  #4af0a8;
+      --accent2: #2563eb;
+      --warn:    #f43f5e;
+      --text:    #e2e8f0;
+      --muted:   #64748b;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 300px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      user-select: none;
+    }
+
+    /* ── Header ──────────────────────────────────────────────────── */
+    .header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .logo {
+      width: 34px; height: 34px; flex-shrink: 0;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px;
+    }
+    .title-block h1 { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+    .title-block p  { font-size: 10px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
+
+    /* ── Status ──────────────────────────────────────────────────── */
+    .status-row {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--muted); flex-shrink: 0; transition: background .3s;
+    }
+    .dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: blink 1.4s infinite; }
+    .dot.error  { background: var(--warn); }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+    #status-text { font-size: 11px; font-family: 'IBM Plex Mono', monospace; color: var(--muted); flex: 1; }
+
+    /* ── Buttons ─────────────────────────────────────────────────── */
+    .controls { padding: 12px 16px; display: flex; gap: 8px; border-bottom: 1px solid var(--border); }
+    button {
+      flex: 1; padding: 9px 12px; border: none; border-radius: 6px;
+      font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; font-weight: 600;
+      cursor: pointer; letter-spacing: .04em; transition: all .15s;
+    }
+    #btn-start { background: var(--accent); color: #0d0f14; }
+    #btn-start:hover:not(:disabled) { background: #6af7bc; transform: translateY(-1px); }
+    #btn-start:disabled { opacity: .35; cursor: not-allowed; }
+    #btn-stop  { background: var(--surface); color: var(--warn); border: 1px solid var(--warn); }
+    #btn-stop:hover:not(:disabled) { background: rgba(244,63,94,.12); transform: translateY(-1px); }
+    #btn-stop:disabled { opacity: .3; cursor: not-allowed; }
+
+    /* ── Settings ────────────────────────────────────────────────── */
+    .section-label {
+      padding: 8px 16px 4px;
+      font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: none;
+    }
+    .settings {
+      padding: 2px 16px 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .row {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .row-label { font-size: 11px; color: var(--muted); }
+    .row-ctrl  { display: flex; align-items: center; gap: 6px; }
+
+    select, input[type=text] {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); border-radius: 4px; font-size: 11px;
+      font-family: 'IBM Plex Mono', monospace; padding: 3px 6px;
+      outline: none; transition: border-color .2s;
+    }
+    select:focus, input[type=text]:focus { border-color: var(--accent); }
+
+    input[type=range] {
+      width: 80px; accent-color: var(--accent);
+      background: transparent; cursor: pointer;
+    }
+    .val-badge {
+      font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+      color: var(--accent); min-width: 22px; text-align: right;
+    }
+
+    /* backend URL spans full width */
+    .row-full { flex-direction: column; align-items: flex-start; gap: 4px; }
+    .row-full input { width: 100%; }
+
+    /* ── Latency indicator ───────────────────────────────────────── */
+    .latency-row {
+      padding: 6px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .latency-bar-bg {
+      flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden;
+    }
+    .latency-bar { height: 100%; background: var(--accent); border-radius: 2px; width: 0; transition: width .4s; }
+    .latency-label { font-size: 10px; font-family: 'IBM Plex Mono', monospace; color: var(--muted); min-width: 52px; text-align: right; }
+
+    /* ── Subtitle preview ────────────────────────────────────────── */
+    .preview { padding: 8px 16px 14px; }
+    .preview-label { font-size: 9px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: 5px; }
+    .preview-text  { font-size: 12px; color: var(--text); min-height: 30px; font-style: italic; opacity: .7; line-height: 1.45; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">🎙</div>
+  <div class="title-block">
+    <h1>Hebrew Subtitles</h1>
+    <p>whisper · live translate</p>
+  </div>
+</div>
+
+<div class="status-row">
+  <div class="dot" id="dot"></div>
+  <span id="status-text">idle — click Start</span>
+</div>
+
+<div class="controls">
+  <button id="btn-start">▶ Start</button>
+  <button id="btn-stop" disabled>■ Stop</button>
+</div>
+
+<!-- Model & chunk settings -->
+<div class="section-label">Model &amp; timing</div>
+<div class="settings">
+  <div class="row">
+    <span class="row-label">Whisper model</span>
+    <div class="row-ctrl">
+      <select id="model-size">
+        <option value="tiny">tiny  (fastest)</option>
+        <option value="base">base</option>
+        <option value="small" selected>small  ← recommended</option>
+        <option value="medium">medium  (best)</option>
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <span class="row-label">Chunk size</span>
+    <div class="row-ctrl">
+      <input type="range" id="chunk-size" min="3" max="12" value="5" step="1" />
+      <span class="val-badge" id="chunk-val">5s</span>
+    </div>
+  </div>
+</div>
+
+<!-- Display settings -->
+<div class="section-label">Display</div>
+<div class="settings">
+  <div class="row">
+    <span class="row-label">Subtitle font size</span>
+    <div class="row-ctrl">
+      <input type="range" id="font-size" min="14" max="40" value="22" step="1" />
+      <span class="val-badge" id="font-val">22px</span>
+    </div>
+  </div>
+  <div class="row">
+    <span class="row-label">Position</span>
+    <div class="row-ctrl">
+      <select id="overlay-pos">
+        <option value="bottom" selected>Bottom</option>
+        <option value="top">Top</option>
+        <option value="center">Center</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- Backend URL -->
+<div class="section-label">Backend</div>
+<div class="settings">
+  <div class="row row-full">
+    <span class="row-label">WebSocket URL</span>
+    <input type="text" id="ws-url" value="ws://localhost:8000/ws/translate" placeholder="ws://host:port/ws/translate" />
+  </div>
+</div>
+
+<!-- Latency bar -->
+<div class="latency-row">
+  <div class="latency-bar-bg"><div class="latency-bar" id="latency-bar"></div></div>
+  <span class="latency-label" id="latency-label">— ms</span>
+</div>
+
+<!-- Last subtitle preview -->
+<div class="preview">
+  <div class="preview-label">Last subtitle</div>
+  <div class="preview-text" id="preview-text">—</div>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>
