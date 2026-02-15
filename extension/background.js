@@ -66,7 +66,6 @@ function handleAudioChunk(chunkBase64, metadata) {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
   
   // 1. Decode Base64 back to Binary
-  // We use the binary string from atob() and write it into a Uint8Array
   const binaryString = atob(chunkBase64);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
@@ -86,7 +85,6 @@ function handleAudioChunk(chunkBase64, metadata) {
   // 3. Send Binary Audio
   socket.send(bytes.buffer);
 }
-// ─────────────────────────────────────────────────────────────────────────────
 
 function openWebSocket(url, attempt = 0) {
   return new Promise((resolve, reject) => {
@@ -105,15 +103,52 @@ function openWebSocket(url, attempt = 0) {
   });
 }
 
+// ── FIXED FUNCTION (Robust Message Handling) ─────────────────────────────────
 function handleServerMessage(event) {
   let msg;
   try { msg = JSON.parse(event.data); } catch (e) { return; }
+
+  // 1. Handle Subtitles
   if (msg.event === 'subtitle' && msg.text && msg.text.trim()) {
-    chrome.tabs.sendMessage(currentTabId, { type: 'SUBTITLE', text: msg.text, start: msg.start, end: msg.end }).catch(() => {});
+    console.log('[BG] 🟢 Received subtitle:', msg.text);
+
+    // Attempt 1: Send to the tab we started capturing from
+    chrome.tabs.sendMessage(currentTabId, { 
+      type: 'SUBTITLE', 
+      text: msg.text, 
+      start: msg.start, 
+      end: msg.end 
+    })
+    .then(() => {
+       // Success - do nothing
+    })
+    .catch((err) => {
+      console.warn('[BG] ⚠️ Failed to send to stored tab (ID ' + currentTabId + '):', err.message);
+      
+      // Attempt 2 (Fallback): Send to whatever tab is currently active
+      chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+        if (tab && tab.id) {
+          console.log('[BG] 🔄 Retrying with active tab (ID ' + tab.id + ')');
+          chrome.tabs.sendMessage(tab.id, { 
+            type: 'SUBTITLE', 
+            text: msg.text, 
+            start: msg.start, 
+            end: msg.end 
+          }).catch(e => console.error('[BG] ❌ Retry failed:', e.message));
+        }
+      });
+    });
+
+    // Send to Popup Preview (if open)
     chrome.runtime.sendMessage({ type: 'SUBTITLE_PREVIEW', text: msg.text }).catch(() => {});
     chrome.storage.local.set({ lastSubtitle: msg.text });
   }
-  if (msg.event === 'error') notifyStatus('backend: ' + msg.message, 'error');
+
+  // 2. Handle Errors from Backend
+  if (msg.event === 'error') {
+    console.error('[BG] Backend error:', msg.message);
+    notifyStatus('backend: ' + msg.message, 'error');
+  }
 }
 
 function notifyStatus(text, state) {

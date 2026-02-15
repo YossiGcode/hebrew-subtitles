@@ -1,8 +1,6 @@
 let mediaRecorder = null;
-let audioCtx = null;
-let sourceNode = null;
-let gainNode = null;
 let captureStream = null;
+let liveAudio = null; // New: Handle playback
 
 // New state for header splicing
 let webmHeader = null; 
@@ -33,14 +31,19 @@ async function startCapture(streamId, config) {
   });
   console.log('[Offscreen] Got stream, tracks:', captureStream.getAudioTracks().length);
 
-  // Direct stream capture (no AudioContext to avoid silence issues)
+  // ── FIX: Play audio so user can hear it ──────────────────
+  liveAudio = new Audio();
+  liveAudio.srcObject = captureStream;
+  liveAudio.play();
+  // ─────────────────────────────────────────────────────────
+
+  // Direct stream capture
   const mimeType = getSupportedMimeType();
   const chunkMs = (config.chunkSize || 5) * 1000;
   
   try {
     mediaRecorder = new MediaRecorder(captureStream, { mimeType });
   } catch (e) {
-    // Fallback if direct capture fails
     console.warn('[Offscreen] Direct MediaRecorder failed, trying default settings', e);
     mediaRecorder = new MediaRecorder(captureStream);
   }
@@ -63,14 +66,12 @@ async function startCapture(streamId, config) {
     let dataToSend = arrayBuffer;
     
     if (chunkIndex === 0) {
-      // Extract header from first chunk
       const clusterOffset = findClusterOffset(arrayBuffer);
       if (clusterOffset > 0) {
         webmHeader = arrayBuffer.slice(0, clusterOffset);
         console.log(`[Offscreen] Captured WebM Header: ${webmHeader.byteLength} bytes`);
       }
     } else {
-      // Prepend header to subsequent chunks
       if (webmHeader) {
         const combined = new Uint8Array(webmHeader.byteLength + arrayBuffer.byteLength);
         combined.set(new Uint8Array(webmHeader), 0);
@@ -79,12 +80,12 @@ async function startCapture(streamId, config) {
       }
     }
 
-    // ── Logic: Convert to Base64 (Fixes 15-byte bug) ─────────
+    // ── Logic: Convert to Base64 ─────────────────────────────
     const base64String = arrayBufferToBase64(dataToSend);
 
     chrome.runtime.sendMessage({
       type: 'AUDIO_CHUNK',
-      chunk: base64String, // Send string, not binary
+      chunk: base64String,
       metadata: { index: chunkIndex++, start: start, end: end, mimeType: mimeType }
     }).catch(() => {});
   };
@@ -98,9 +99,6 @@ async function startCapture(streamId, config) {
   console.log('[Offscreen] Recording started, chunk interval:', chunkMs, 'ms');
 }
 
-/**
- * Converts ArrayBuffer to Base64 string to survive Chrome message passing.
- */
 function arrayBufferToBase64(buffer) {
   let binary = '';
   const bytes = new Uint8Array(buffer);
@@ -114,7 +112,6 @@ function arrayBufferToBase64(buffer) {
 function findClusterOffset(buffer) {
   const view = new Uint8Array(buffer);
   const len = view.length;
-  // Scan for WebM Cluster ID: 0x1F 0x43 0xB6 0x75
   for (let i = 0; i < len - 3; i++) {
     if (view[i] === 0x1F && view[i+1] === 0x43 && view[i+2] === 0xB6 && view[i+3] === 0x75) {
       return i;
@@ -127,6 +124,14 @@ function stopCapture() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
   mediaRecorder = null;
   webmHeader = null;
+  
+  // Stop playback
+  if (liveAudio) {
+    liveAudio.pause();
+    liveAudio.srcObject = null;
+    liveAudio = null;
+  }
+  
   if (captureStream) { captureStream.getTracks().forEach(t => t.stop()); captureStream = null; }
 }
 
