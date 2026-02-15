@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .claude/
 *.backup
+start.ps1  
+backend/start.ps1
+backend/venv/
+extension/node_modules/ 

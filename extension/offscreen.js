@@ -4,6 +4,9 @@ let sourceNode = null;
 let gainNode = null;
 let captureStream = null;
 
+// New state for header splicing
+let webmHeader = null; 
+
 chrome.runtime.sendMessage({ type: 'OFFSCREEN_READY' }).catch(() => {});
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -21,99 +24,109 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function startCapture(streamId, config) {
   console.log('[Offscreen] Starting capture');
+  
+  // Reset state
+  webmHeader = null;
+  
   captureStream = await navigator.mediaDevices.getUserMedia({
     audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } }
   });
   console.log('[Offscreen] Got stream, tracks:', captureStream.getAudioTracks().length);
 
-  audioCtx = new AudioContext();
-  sourceNode = audioCtx.createMediaStreamSource(captureStream);
-  gainNode = audioCtx.createGain();
-  gainNode.gain.value = 1.0;
-  const recDest = audioCtx.createMediaStreamDestination();
-
-  sourceNode.connect(gainNode);
-  gainNode.connect(recDest);
-  // Also pass audio through to the tab so the user can still hear it
-  gainNode.connect(audioCtx.destination);
-
-  // Wait for actual audio data before starting the recorder
-  await waitForAudioFlow(audioCtx, sourceNode);
-
+  // Direct stream capture (no AudioContext to avoid silence issues)
   const mimeType = getSupportedMimeType();
   const chunkMs = (config.chunkSize || 5) * 1000;
-  mediaRecorder = new MediaRecorder(recDest.stream, { mimeType });
-  console.log('[Offscreen] MediaRecorder created on recDest.stream');
+  
+  try {
+    mediaRecorder = new MediaRecorder(captureStream, { mimeType });
+  } catch (e) {
+    // Fallback if direct capture fails
+    console.warn('[Offscreen] Direct MediaRecorder failed, trying default settings', e);
+    mediaRecorder = new MediaRecorder(captureStream);
+  }
+
+  console.log('[Offscreen] MediaRecorder created');
+  
   let chunkIndex = 0;
   let chunkStartSec = 0;
+  
   mediaRecorder.ondataavailable = async (e) => {
-    if (!e.data || e.data.size < 512) return;
+    if (!e.data || e.data.size < 1) return;
+    
     const start = chunkStartSec;
     const end = start + chunkMs / 1000;
     chunkStartSec = end;
+    
     const arrayBuffer = await e.data.arrayBuffer();
+    
+    // ── Logic: WebM Header Splicing ──────────────────────────
+    let dataToSend = arrayBuffer;
+    
+    if (chunkIndex === 0) {
+      // Extract header from first chunk
+      const clusterOffset = findClusterOffset(arrayBuffer);
+      if (clusterOffset > 0) {
+        webmHeader = arrayBuffer.slice(0, clusterOffset);
+        console.log(`[Offscreen] Captured WebM Header: ${webmHeader.byteLength} bytes`);
+      }
+    } else {
+      // Prepend header to subsequent chunks
+      if (webmHeader) {
+        const combined = new Uint8Array(webmHeader.byteLength + arrayBuffer.byteLength);
+        combined.set(new Uint8Array(webmHeader), 0);
+        combined.set(new Uint8Array(arrayBuffer), webmHeader.byteLength);
+        dataToSend = combined.buffer;
+      }
+    }
+
+    // ── Logic: Convert to Base64 (Fixes 15-byte bug) ─────────
+    const base64String = arrayBufferToBase64(dataToSend);
+
     chrome.runtime.sendMessage({
       type: 'AUDIO_CHUNK',
-      chunk: arrayBuffer,
+      chunk: base64String, // Send string, not binary
       metadata: { index: chunkIndex++, start: start, end: end, mimeType: mimeType }
     }).catch(() => {});
   };
+  
   mediaRecorder.onerror = (e) => {
     console.error('[Offscreen] Recorder error:', e);
     chrome.runtime.sendMessage({ type: 'CAPTURE_ERROR', error: e.error?.message || 'error' }).catch(() => {});
   };
+  
   mediaRecorder.start(chunkMs);
   console.log('[Offscreen] Recording started, chunk interval:', chunkMs, 'ms');
 }
 
 /**
- * Polls an AnalyserNode until non-silent audio is detected or timeout.
- * Returns once audio samples exceed the silence threshold.
+ * Converts ArrayBuffer to Base64 string to survive Chrome message passing.
  */
-function waitForAudioFlow(ctx, source) {
-  return new Promise((resolve) => {
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 2048;
-    source.connect(analyser);
-    const buf = new Float32Array(analyser.fftSize);
-    const SILENCE_THRESHOLD = 0.001;
-    const POLL_INTERVAL = 50;
-    const MAX_WAIT = 5000;
-    let elapsed = 0;
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 
-    const poll = () => {
-      analyser.getFloatTimeDomainData(buf);
-      let maxVal = 0;
-      for (let i = 0; i < buf.length; i++) {
-        const abs = Math.abs(buf[i]);
-        if (abs > maxVal) maxVal = abs;
-      }
-      if (maxVal > SILENCE_THRESHOLD) {
-        console.log('[Offscreen] Audio detected (peak:', maxVal.toFixed(4), ') after', elapsed, 'ms');
-        analyser.disconnect();
-        resolve();
-        return;
-      }
-      elapsed += POLL_INTERVAL;
-      if (elapsed >= MAX_WAIT) {
-        console.warn('[Offscreen] Audio wait timeout after', MAX_WAIT, 'ms, starting anyway');
-        analyser.disconnect();
-        resolve();
-        return;
-      }
-      setTimeout(poll, POLL_INTERVAL);
-    };
-    poll();
-  });
+function findClusterOffset(buffer) {
+  const view = new Uint8Array(buffer);
+  const len = view.length;
+  // Scan for WebM Cluster ID: 0x1F 0x43 0xB6 0x75
+  for (let i = 0; i < len - 3; i++) {
+    if (view[i] === 0x1F && view[i+1] === 0x43 && view[i+2] === 0xB6 && view[i+3] === 0x75) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 function stopCapture() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
   mediaRecorder = null;
-  try { sourceNode?.disconnect(); } catch (_) {}
-  try { gainNode?.disconnect(); } catch (_) {}
-  try { audioCtx?.close(); } catch (_) {}
-  sourceNode = gainNode = audioCtx = null;
+  webmHeader = null;
   if (captureStream) { captureStream.getTracks().forEach(t => t.stop()); captureStream = null; }
 }
 

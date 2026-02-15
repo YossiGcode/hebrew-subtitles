@@ -61,12 +61,32 @@ async function setupOffscreenDocument() {
   console.log('[BG] Offscreen created');
 }
 
-function handleAudioChunk(chunkArrayBuffer, metadata) {
+// ── FIXED FUNCTION (Base64 Decoding) ─────────────────────────────────────────
+function handleAudioChunk(chunkBase64, metadata) {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
-  socket.send(JSON.stringify({ event: 'chunk', index: metadata.index, start: metadata.start, end: metadata.end, mimeType: metadata.mimeType }));
-  const blob = new Blob([chunkArrayBuffer], { type: metadata.mimeType });
-  socket.send(blob);
+  
+  // 1. Decode Base64 back to Binary
+  // We use the binary string from atob() and write it into a Uint8Array
+  const binaryString = atob(chunkBase64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+
+  // 2. Send JSON Metadata
+  socket.send(JSON.stringify({ 
+    event: 'chunk', 
+    index: metadata.index, 
+    start: metadata.start, 
+    end: metadata.end, 
+    mimeType: metadata.mimeType 
+  }));
+
+  // 3. Send Binary Audio
+  socket.send(bytes.buffer);
 }
+// ─────────────────────────────────────────────────────────────────────────────
 
 function openWebSocket(url, attempt = 0) {
   return new Promise((resolve, reject) => {
